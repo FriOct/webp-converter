@@ -562,6 +562,17 @@
       outputBps: 8,
       outputColor: 1,
       useCameraWb: true,
+      // LibRaw's default auto-bright (autoBrightThr: 0.01, i.e. clip ~1% of
+      // pixels to white) reliably overexposed this camera's own JPEG render
+      // by ~30% on a real test shot — measured by sampling matching patches
+      // against the straight-out-of-camera JPEG and comparing mean RGB.
+      // Cutting the clip threshold ~300x closer to 0 (near-linear exposure,
+      // no aggressive highlight-driven stretch) got within a few RGB levels
+      // of the camera JPEG at every sample point and visually matched far
+      // better. This is tuned against one scene, not derived from a spec —
+      // if a photo still looks noticeably brighter/darker than expected,
+      // that's the parameter to revisit.
+      autoBrightThr: 0.00003,
       ...pickNoiseSettings(iso),
     });
     const img = await libRawInstance.imageData();
