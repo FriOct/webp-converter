@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>JPG → WEBP 변환기</title>
+<meta name="description" content="브라우저에서 바로 JPG를 WEBP로 변환하세요. 업로드 없이 100% 로컬에서 처리됩니다." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🖼️</text></svg>" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>JPG → WEBP 변환기</h1>
+      <p class="subtitle">파일을 서버로 업로드하지 않고, 이 브라우저 안에서 바로 변환합니다.</p>
+    </header>
+
+    <section id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="JPG 파일 선택">
+      <input type="file" id="fileInput" accept=".jpg,.jpeg,image/jpeg" multiple hidden />
+      <div class="dropzone-inner">
+        <div class="dropzone-icon">📁</div>
+        <p><strong>클릭</strong>하거나 JPG 파일을 이곳에 <strong>드래그 앤 드롭</strong>하세요</p>
+        <p class="hint">여러 장을 한 번에 올릴 수 있어요 (.jpg / .jpeg)</p>
+      </div>
+    </section>
+
+    <section class="controls">
+      <div class="control">
+        <label for="qualityMode">품질 모드</label>
+        <select id="qualityMode">
+          <option value="auto" selected>자동 (20MB 이하로 최고 품질)</option>
+          <option value="manual">수동 (품질 직접 지정)</option>
+        </select>
+      </div>
+      <div class="control" id="manualQualityRow" hidden>
+        <label for="qualitySlider">품질: <span id="qualityValue">90</span></label>
+        <input type="range" id="qualitySlider" min="1" max="100" value="90" />
+      </div>
+      <div class="control checkbox-row">
+        <label><input type="checkbox" id="resizeToggle" checked /> 긴 변이 4000px를 넘으면 축소</label>
+      </div>
+    </section>
+
+    <section class="actions" id="actions" hidden>
+      <button id="convertAllBtn" class="btn primary">전체 변환</button>
+      <button id="downloadZipBtn" class="btn" disabled>전체 ZIP 다운로드</button>
+      <button id="clearBtn" class="btn ghost">목록 비우기</button>
+    </section>
+
+    <section id="fileList" class="file-list"></section>
+
+    <footer>
+      <p>모든 변환은 사용자의 브라우저에서만 처리되며, 이미지가 외부 서버로 전송되지 않습니다.</p>
+    </footer>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
