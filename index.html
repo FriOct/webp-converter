@@ -230,8 +230,9 @@
     <span class="eyebrow">이미지 → WebP</span>
     <h1>NEF·JPG를 디시 업로드용 WebP로</h1>
     <p class="sub">
-      NEF는 카메라가 만들어둔 미리보기 JPEG(가장 큰 것)를 찾아 사용하고, JPG·PNG 등은 그대로 불러와
-      원하는 품질·장축 기준으로 WebP로 다시 인코딩합니다. 파일은 브라우저 밖으로 나가지 않습니다.
+      NEF는 브라우저 안에서 실제 raw 센서 데이터를 디코딩(LibRaw)해 카메라 화이트밸런스로 현상하고,
+      JPG·PNG 등은 그대로 불러와 원하는 품질·장축 기준으로 WebP로 다시 인코딩합니다.
+      파일은 브라우저 밖으로 나가지 않습니다.
     </p>
   </header>
 
@@ -275,6 +276,7 @@
         <li><b>품질을 낮추는 것</b>은 해상도를 그대로 둔 채 압축만 세게 거는 것이라 용량은 크게 줄어도 선명도는 거의 유지됩니다.</li>
         <li><b>장축을 리사이즈하는 것</b>은 실제로 픽셀 수를 줄이는 것이라 화질이 떨어집니다. 다만 초고해상도 원본을 그대로 올리면 LTE 환경이나 저사양 기기에서 로딩이 느려지므로, 장축 4000px 안팎으로 제한하는 편이 열람 경험에는 낫습니다.</li>
       </ul>
+      <p>NEF는 브라우저 안에서 LibRaw(WASM)로 실제 raw 현상을 하기 때문에 사진 한 장당 몇 초씩 걸릴 수 있고, 메모리 문제를 피하려고 한 번에 한 장씩 처리합니다. raw 엔진 로드에 실패하면(오프라인 등) 자동으로 카메라 내장 미리보기 JPEG를 쓰는 방식으로 대체됩니다.</p>
       <p class="limits">2026년 기준 갤러리 업로드 제한: 장당 최대 20MB, 글 하나에 최대 50장 · 합산 120MB. 장당 8~10MB를 넘지 않는 선을 권장합니다.</p>
     </div>
   </details>
@@ -443,33 +445,122 @@
     })[0];
   }
 
-  async function encodeToWebp(sourceBlob, quality, maxLongEdge) {
-    const bitmap = await createImageBitmap(sourceBlob);
-    let width = bitmap.width, height = bitmap.height;
-    if (maxLongEdge > 0 && Math.max(width, height) > maxLongEdge) {
-      const scale = maxLongEdge / Math.max(width, height);
-      width = Math.max(1, Math.round(width * scale));
-      height = Math.max(1, Math.round(height * scale));
-    }
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    canvas.getContext("2d").drawImage(bitmap, 0, 0, width, height);
-    bitmap.close && bitmap.close();
-    const webpBlob = await new Promise((resolve, reject) => {
+  function canvasToWebp(canvas, quality) {
+    return new Promise((resolve, reject) => {
       canvas.toBlob(b => b ? resolve(b) : reject(new Error("WebP 인코딩 실패 (브라우저가 WebP 인코딩을 지원하지 않을 수 있습니다)")), "image/webp", quality);
     });
-    return { webpBlob, width, height };
+  }
+
+  function resizeCanvasIfNeeded(srcCanvas, maxLongEdge) {
+    const { width, height } = srcCanvas;
+    if (!(maxLongEdge > 0) || Math.max(width, height) <= maxLongEdge) return srcCanvas;
+    const scale = maxLongEdge / Math.max(width, height);
+    const w = Math.max(1, Math.round(width * scale));
+    const h = Math.max(1, Math.round(height * scale));
+    const out = document.createElement("canvas");
+    out.width = w;
+    out.height = h;
+    out.getContext("2d").drawImage(srcCanvas, 0, 0, w, h);
+    return out;
+  }
+
+  async function encodeToWebp(sourceBlob, quality, maxLongEdge) {
+    const bitmap = await createImageBitmap(sourceBlob);
+    const srcCanvas = document.createElement("canvas");
+    srcCanvas.width = bitmap.width;
+    srcCanvas.height = bitmap.height;
+    srcCanvas.getContext("2d").drawImage(bitmap, 0, 0);
+    bitmap.close && bitmap.close();
+    const outCanvas = resizeCanvasIfNeeded(srcCanvas, maxLongEdge);
+    const webpBlob = await canvasToWebp(outCanvas, quality);
+    return { webpBlob, width: outCanvas.width, height: outCanvas.height };
+  }
+
+  async function encodeImageDataToWebp(imageData, quality, maxLongEdge) {
+    const srcCanvas = document.createElement("canvas");
+    srcCanvas.width = imageData.width;
+    srcCanvas.height = imageData.height;
+    srcCanvas.getContext("2d").putImageData(imageData, 0, 0);
+    const outCanvas = resizeCanvasIfNeeded(srcCanvas, maxLongEdge);
+    const webpBlob = await canvasToWebp(outCanvas, quality);
+    return { webpBlob, width: outCanvas.width, height: outCanvas.height };
+  }
+
+  // ---- NEF: real raw decode via LibRaw (WASM), with a preview-JPEG fallback ----
+  // LibRaw-Wasm (https://github.com/ybouane/LibRaw-Wasm) runs the actual demosaic
+  // + camera color matrix in a Web Worker, so colors match a real raw converter
+  // instead of the camera's own baked-in preview JPEG. If the CDN import fails
+  // (offline, or a sandboxed preview that blocks outside network calls), this
+  // falls back to extracting the embedded preview JPEG like before.
+  const LIBRAW_CDN_URL = "https://cdn.jsdelivr.net/npm/libraw-wasm@1.6.0/dist/index.js";
+  let libRawModulePromise = null;
+  let libRawInstance = null;
+  let libRawQueue = Promise.resolve();
+
+  function loadLibRaw() {
+    if (!libRawModulePromise) {
+      libRawModulePromise = import(LIBRAW_CDN_URL)
+        .then(m => m.default)
+        .catch(err => { libRawModulePromise = null; throw err; });
+    }
+    return libRawModulePromise;
+  }
+
+  async function decodeNefWithLibRaw(file) {
+    const LibRawCtor = await loadLibRaw();
+    if (!libRawInstance) libRawInstance = new LibRawCtor();
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    await libRawInstance.open(bytes, {
+      outputBps: 8,
+      outputColor: 1,
+      useCameraWb: true,
+    });
+    const img = await libRawInstance.imageData();
+    if (!img || !img.data || !img.colors || img.colors < 3) {
+      throw new Error("RAW 디코딩에 실패했습니다");
+    }
+    const { width, height, colors, data } = img;
+    const rgba = new Uint8ClampedArray(width * height * 4);
+    for (let i = 0, j = 0; j < rgba.length; i += colors, j += 4) {
+      rgba[j] = data[i];
+      rgba[j + 1] = data[i + 1];
+      rgba[j + 2] = data[i + 2];
+      rgba[j + 3] = 255;
+    }
+    return new ImageData(rgba, width, height);
+  }
+
+  async function processNefPreviewFallback(file, quality, maxLongEdge) {
+    const buffer = await file.arrayBuffer();
+    const candidates = collectJpegCandidates(buffer);
+    const best = pickBest(candidates);
+    if (!best) throw new Error("RAW 디코딩과 미리보기 추출이 모두 실패했습니다");
+    const jpegBlob = new Blob([new Uint8Array(buffer, best.offset, best.length)], { type: "image/jpeg" });
+    const result = await encodeToWebp(jpegBlob, quality, maxLongEdge);
+    result.fallback = true;
+    return result;
+  }
+
+  async function runNefTask(file, quality, maxLongEdge) {
+    try {
+      const imageData = await decodeNefWithLibRaw(file);
+      return await encodeImageDataToWebp(imageData, quality, maxLongEdge);
+    } catch (err) {
+      return processNefPreviewFallback(file, quality, maxLongEdge);
+    }
+  }
+
+  function processNef(file, quality, maxLongEdge) {
+    // NEF decodes run one at a time (a full-res demosaic buffer can be 100MB+),
+    // queued behind a chain that never itself rejects so later files still run.
+    const task = libRawQueue.then(() => runNefTask(file, quality, maxLongEdge));
+    libRawQueue = task.catch(() => {});
+    return task;
   }
 
   async function processFile(file, quality, maxLongEdge) {
     if (/\.nef$/i.test(file.name)) {
-      const buffer = await file.arrayBuffer();
-      const candidates = collectJpegCandidates(buffer);
-      const best = pickBest(candidates);
-      if (!best) throw new Error("임베디드 미리보기 이미지를 찾지 못했습니다");
-      const jpegBlob = new Blob([new Uint8Array(buffer, best.offset, best.length)], { type: "image/jpeg" });
-      return encodeToWebp(jpegBlob, quality, maxLongEdge);
+      return processNef(file, quality, maxLongEdge);
     }
     return encodeToWebp(file, quality, maxLongEdge);
   }
@@ -612,7 +703,7 @@
       <div class="file-meta">
         <div class="file-name">${escapeHtml(file.name)}</div>
         <div class="file-detail mono"><span class="dims">-</span><span class="size">${fmtBytes(file.size)}</span></div>
-        <div class="status busy">추출 중…</div>
+        <div class="status busy">처리 중…</div>
       </div>
       <div class="file-actions">
         <button class="btn btn-download" disabled>다운로드</button>
@@ -651,7 +742,9 @@
       item.thumbEl.replaceWith(img);
       item.thumbEl = img;
       item.dimsEl.textContent = (result.width && result.height) ? `${result.width}×${result.height}` : "";
-      item.statusEl.textContent = `완료 · ${fmtBytes(result.webpBlob.size)}`;
+      item.statusEl.textContent = result.fallback
+        ? `완료(미리보기 방식) · ${fmtBytes(result.webpBlob.size)}`
+        : `완료 · ${fmtBytes(result.webpBlob.size)}`;
       item.statusEl.className = "status ok";
       item.downloadBtn.disabled = false;
       item.downloadBtn.textContent = "다운로드";
