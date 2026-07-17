@@ -489,17 +489,24 @@
   // ---- NEF: real raw decode via LibRaw (WASM), with a preview-JPEG fallback ----
   // LibRaw-Wasm (https://github.com/ybouane/LibRaw-Wasm) runs the actual demosaic
   // + camera color matrix in a Web Worker, so colors match a real raw converter
-  // instead of the camera's own baked-in preview JPEG. If the CDN import fails
-  // (offline, or a sandboxed preview that blocks outside network calls), this
-  // falls back to extracting the embedded preview JPEG like before.
-  const LIBRAW_CDN_URL = "https://cdn.jsdelivr.net/npm/libraw-wasm@1.6.0/dist/index.js";
+  // instead of the camera's own baked-in preview JPEG.
+  //
+  // The library spawns its worker via `new Worker(new URL("./worker.js", import.meta.url))`,
+  // and browsers refuse to construct a Worker from a cross-origin script URL even
+  // when the response has permissive CORS headers (verified: loading it from a CDN
+  // throws "SecurityError: Failed to construct 'Worker'" on a github.io page). So
+  // the runtime is vendored alongside this page (./vendor/libraw-wasm/) and loaded
+  // same-origin instead of from a CDN. If that path 404s or the module otherwise
+  // fails to load (e.g. a sandboxed preview with no filesystem to serve it from),
+  // this falls back to extracting the embedded preview JPEG like before.
+  const LIBRAW_MODULE_URL = "./vendor/libraw-wasm/index.js";
   let libRawModulePromise = null;
   let libRawInstance = null;
   let libRawQueue = Promise.resolve();
 
   function loadLibRaw() {
     if (!libRawModulePromise) {
-      libRawModulePromise = import(LIBRAW_CDN_URL)
+      libRawModulePromise = import(LIBRAW_MODULE_URL)
         .then(m => m.default)
         .catch(err => { libRawModulePromise = null; throw err; });
     }
