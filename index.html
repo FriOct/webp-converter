@@ -549,7 +549,13 @@
   function pickNoiseSettings(iso) {
     if (iso == null || iso < 800) return {};
     if (iso <= 3200) return { fbddNoiserd: 1 };
-    return { fbddNoiserd: 2, threshold: 300 };
+    // fbddNoiserd:2 ("full" FBDD) measurably crushes whole-image saturation —
+    // on the test shot it dropped mean/median HSV saturation from ~17/16
+    // (matching macOS's own NEF render) to ~14/11, even though it reduced
+    // per-pixel chroma noise about as well as this combo does. fbddNoiserd:1
+    // + a wavelet threshold gets the same flat-area noise reduction without
+    // the saturation loss.
+    return { fbddNoiserd: 1, threshold: 200 };
   }
 
   async function decodeNefWithLibRaw(file) {
