@@ -1,60 +1,721 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>JPG → WEBP 변환기</title>
-<meta name="description" content="브라우저에서 바로 JPG를 WEBP로 변환하세요. 업로드 없이 100% 로컬에서 처리됩니다." />
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🖼️</text></svg>" />
-<link rel="stylesheet" href="style.css" />
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NEF·JPG → WebP 변환기</title>
+<style>
+  :root {
+    --bg: #14171a;
+    --surface: #1b1f23;
+    --surface-2: #21262b;
+    --border: #313841;
+    --text: #dde2e6;
+    --text-muted: #8892a0;
+    --accent: #5c8aa8;
+    --accent-strong: #7aa4c0;
+    --accent-text: #0c1417;
+    --good: #6fa87e;
+    --bad: #c47a72;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f2f4f5;
+      --surface: #ffffff;
+      --surface-2: #e9edf0;
+      --border: #d3dade;
+      --text: #1b2024;
+      --text-muted: #626b74;
+      --accent: #3d6f8e;
+      --accent-strong: #2f5972;
+      --accent-text: #f5f9fb;
+      --good: #3f7d52;
+      --bad: #a8483c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171a;
+    --surface: #1b1f23;
+    --surface-2: #21262b;
+    --border: #313841;
+    --text: #dde2e6;
+    --text-muted: #8892a0;
+    --accent: #5c8aa8;
+    --accent-strong: #7aa4c0;
+    --accent-text: #0c1417;
+    --good: #6fa87e;
+    --bad: #c47a72;
+  }
+  :root[data-theme="light"] {
+    --bg: #f2f4f5;
+    --surface: #ffffff;
+    --surface-2: #e9edf0;
+    --border: #d3dade;
+    --text: #1b2024;
+    --text-muted: #626b74;
+    --accent: #3d6f8e;
+    --accent-strong: #2f5972;
+    --accent-text: #f5f9fb;
+    --good: #3f7d52;
+    --bad: #a8483c;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Pretendard, "Apple SD Gothic Neo", sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  .wrap {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 40px 20px 80px;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+
+  header { display: flex; flex-direction: column; gap: 8px; }
+  .eyebrow {
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  h1 {
+    font-size: 25px;
+    margin: 0;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  .sub { color: var(--text-muted); font-size: 14px; max-width: 62ch; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+  }
+
+  .dropzone {
+    border: 1.5px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 34px 20px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 14px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    display: block;
+  }
+  .dropzone:hover, .dropzone.drag { border-color: var(--accent); background: var(--surface-2); color: var(--text); }
+  .dropzone strong { color: var(--text); }
+  .dropzone input { display: none; }
+
+  .settings { display: flex; flex-direction: column; gap: 16px; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field-row { display: flex; align-items: center; gap: 14px; }
+  .field-row label { font-size: 13px; color: var(--text-muted); flex: none; width: 92px; }
+  .field-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+  .field-row input[type="number"] {
+    flex: 1; max-width: 120px;
+    font: inherit; font-size: 14px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 6px 8px;
+  }
+  .field-value { font-size: 14px; min-width: 3.5ch; text-align: right; }
+  .field-caption { font-size: 12px; color: var(--text-muted); padding-left: 106px; }
+
+  .filelist { display: flex; flex-direction: column; gap: 10px; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .toolbar .count { font-size: 13px; color: var(--text-muted); }
+
+  .file-row {
+    display: grid;
+    grid-template-columns: 52px 1fr auto;
+    gap: 14px;
+    align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 11px 12px;
+  }
+  .thumb {
+    width: 52px; height: 52px;
+    border-radius: 6px;
+    background: var(--surface-2);
+    object-fit: cover;
+    border: 1px solid var(--border);
+  }
+  .thumb.placeholder { display: flex; align-items: center; justify-content: center; font-size: 10.5px; color: var(--text-muted); letter-spacing: 0.03em; }
+  .file-meta { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .file-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-detail { font-size: 12.5px; color: var(--text-muted); display: flex; gap: 8px; flex-wrap: wrap; }
+  .status { font-size: 12px; }
+  .status.ok { color: var(--good); }
+  .status.err { color: var(--bad); }
+  .status.busy { color: var(--accent); }
+
+  .file-actions { display: flex; align-items: center; gap: 8px; }
+  .btn {
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 14px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
+  }
+  .btn.primary:hover { background: var(--accent-strong); }
+  .btn-remove:hover { border-color: var(--bad); color: var(--bad); }
+
+  details.tips { padding: 0; overflow: hidden; }
+  details.tips summary {
+    cursor: pointer;
+    padding: 16px 20px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    list-style: none;
+  }
+  details.tips summary::-webkit-details-marker { display: none; }
+  details.tips summary::before {
+    content: "▸ ";
+    color: var(--accent);
+  }
+  details.tips[open] summary::before { content: "▾ "; }
+  .tips-body { padding: 0 20px 18px; display: flex; flex-direction: column; gap: 10px; font-size: 13.5px; color: var(--text-muted); }
+  .tips-body p { margin: 0; }
+  .tips-body b { color: var(--text); }
+  .tips-body ul { margin: 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+  .tips-body li { display: flex; gap: 9px; align-items: baseline; }
+  .tips-body li::before {
+    content: "";
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex: none;
+    margin-top: 6px;
+  }
+  .tips-body .limits { padding-top: 10px; border-top: 1px dashed var(--border); font-size: 12.5px; }
+
+  footer { font-size: 12px; color: var(--text-muted); text-align: center; padding-top: 4px; }
+</style>
 </head>
 <body>
-  <div class="wrap">
-    <header>
-      <h1>JPG → WEBP 변환기</h1>
-      <p class="subtitle">파일을 서버로 업로드하지 않고, 이 브라우저 안에서 바로 변환합니다.</p>
-    </header>
+<div class="wrap">
 
-    <section id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="JPG 파일 선택">
-      <input type="file" id="fileInput" accept=".jpg,.jpeg,image/jpeg" multiple hidden />
-      <div class="dropzone-inner">
-        <div class="dropzone-icon">📁</div>
-        <p><strong>클릭</strong>하거나 JPG 파일을 이곳에 <strong>드래그 앤 드롭</strong>하세요</p>
-        <p class="hint">여러 장을 한 번에 올릴 수 있어요 (.jpg / .jpeg)</p>
+  <header>
+    <span class="eyebrow">이미지 → WebP</span>
+    <h1>NEF·JPG를 디시 업로드용 WebP로</h1>
+    <p class="sub">
+      NEF는 카메라가 만들어둔 미리보기 JPEG(가장 큰 것)를 찾아 사용하고, JPG·PNG 등은 그대로 불러와
+      원하는 품질·장축 기준으로 WebP로 다시 인코딩합니다. 파일은 브라우저 밖으로 나가지 않습니다.
+    </p>
+  </header>
+
+  <label class="dropzone" id="dropzone">
+    <input type="file" id="fileInput" accept=".nef,.NEF,image/*" multiple />
+    <div><strong>NEF·JPG·PNG 파일을 여기로 드래그</strong>하거나 클릭해서 선택하세요</div>
+    <div style="margin-top:4px;">여러 장을 한 번에 올릴 수 있습니다</div>
+  </label>
+
+  <section class="card settings">
+    <div class="field">
+      <div class="field-row">
+        <label for="quality">품질</label>
+        <input type="range" id="quality" min="1" max="100" value="92" />
+        <span class="field-value mono"><span id="qualityValue">92</span></span>
       </div>
-    </section>
-
-    <section class="controls">
-      <div class="control">
-        <label for="qualityMode">품질 모드</label>
-        <select id="qualityMode">
-          <option value="auto" selected>자동 (20MB 이하로 최고 품질)</option>
-          <option value="manual">수동 (품질 직접 지정)</option>
-        </select>
+      <div class="field-caption">해상도는 그대로 두고 압축만 세게 겁니다. 92 부근이 화질 저하 없이 용량을 가장 아낄 수 있는 지점으로 알려져 있습니다.</div>
+    </div>
+    <div class="field">
+      <div class="field-row">
+        <label for="longEdge">장축 제한(px)</label>
+        <input type="number" id="longEdge" min="0" step="100" value="4000" placeholder="0 = 원본 유지" />
       </div>
-      <div class="control" id="manualQualityRow" hidden>
-        <label for="qualitySlider">품질: <span id="qualityValue">90</span></label>
-        <input type="range" id="qualitySlider" min="1" max="100" value="90" />
+      <div class="field-caption">긴 변 기준 픽셀 수 제한 — 실제 해상도를 줄이므로 화질에 영향이 있습니다. 디시 규정은 아니고, 초고해상도 원본이 모바일에서 느리게 로딩되는 걸 줄이기 위한 권장치입니다. 0으로 두면 원본 해상도를 유지합니다.</div>
+    </div>
+  </section>
+
+  <section class="filelist" id="filelist" hidden>
+    <div class="toolbar">
+      <span class="count mono" id="fileCount"></span>
+      <button class="btn primary" id="downloadZip" disabled>전체 ZIP 다운로드</button>
+    </div>
+    <div id="rows" style="display:flex; flex-direction:column; gap:10px;"></div>
+  </section>
+
+  <details class="card tips">
+    <summary>왜 이렇게 압축·변환해야 하나요?</summary>
+    <div class="tips-body">
+      <p>일반 JPG·PNG를 그대로 올리면 게시글 안에서는 장축(긴 변) 849px로 강제 축소되어 보입니다. 클릭하면 원본이 뜨지만, 실제로 클릭해서 원본까지 확인하는 사람은 많지 않습니다. WebP로 올리면 이 강제 축소를 피할 수 있어 게시글 안에서 바로 고화질로 보입니다.</p>
+      <ul>
+        <li><b>품질을 낮추는 것</b>은 해상도를 그대로 둔 채 압축만 세게 거는 것이라 용량은 크게 줄어도 선명도는 거의 유지됩니다.</li>
+        <li><b>장축을 리사이즈하는 것</b>은 실제로 픽셀 수를 줄이는 것이라 화질이 떨어집니다. 다만 초고해상도 원본을 그대로 올리면 LTE 환경이나 저사양 기기에서 로딩이 느려지므로, 장축 4000px 안팎으로 제한하는 편이 열람 경험에는 낫습니다.</li>
+      </ul>
+      <p class="limits">2026년 기준 갤러리 업로드 제한: 장당 최대 20MB, 글 하나에 최대 50장 · 합산 120MB. 장당 8~10MB를 넘지 않는 선을 권장합니다.</p>
+    </div>
+  </details>
+
+  <footer>
+    모든 변환은 이 브라우저 안에서만 이루어지며 파일은 어디로도 전송되지 않습니다.
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  const TYPE_SIZES = {1:1,2:1,3:2,4:4,5:8,6:1,7:1,8:2,9:4,10:8,11:4,12:8};
+
+  function readIFD(view, offset, le) {
+    const numEntries = view.getUint16(offset, le);
+    const entries = new Map();
+    for (let i = 0; i < numEntries; i++) {
+      const eo = offset + 2 + i * 12;
+      const tag = view.getUint16(eo, le);
+      const type = view.getUint16(eo + 2, le);
+      const count = view.getUint32(eo + 4, le);
+      const size = (TYPE_SIZES[type] || 1) * count;
+      const valOff = size <= 4 ? eo + 8 : view.getUint32(eo + 8, le);
+      entries.set(tag, { type, count, valOff, size });
+    }
+    const nextOffset = view.getUint32(offset + 2 + numEntries * 12, le);
+    return { entries, nextOffset };
+  }
+
+  function readValues(view, entry, le) {
+    const { type, count, valOff } = entry;
+    const out = [];
+    for (let i = 0; i < count; i++) {
+      switch (type) {
+        case 1: case 6: case 7: out.push(view.getUint8(valOff + i)); break;
+        case 3: case 8: out.push(view.getUint16(valOff + i * 2, le)); break;
+        case 4: case 9: out.push(view.getUint32(valOff + i * 4, le)); break;
+        default: out.push(null);
+      }
+    }
+    return out;
+  }
+
+  function getTagValues(entries, tag, view, le) {
+    const e = entries.get(tag);
+    if (!e) return null;
+    try { return readValues(view, e, le); } catch (err) { return null; }
+  }
+
+  // Best-effort extraction of Nikon MakerNote's PreviewIFD, which on many
+  // bodies holds a larger/cleaner JPEG preview than the standard SubIFDs.
+  function extractNikonMakerNotePreview(buffer, view, le, ifd0Offset, candidates) {
+    const ifd0 = readIFD(view, ifd0Offset, le);
+    const exifEntry = ifd0.entries.get(0x8769);
+    if (!exifEntry) return;
+    const exifOffset = readValues(view, exifEntry, le)[0];
+    const exifIFD = readIFD(view, exifOffset, le);
+    const makerEntry = exifIFD.entries.get(0x927c);
+    if (!makerEntry || makerEntry.size <= 4) return;
+    const mnStart = makerEntry.valOff;
+    if (mnStart + 10 >= buffer.byteLength) return;
+    const sig = String.fromCharCode(
+      view.getUint8(mnStart), view.getUint8(mnStart + 1), view.getUint8(mnStart + 2),
+      view.getUint8(mnStart + 3), view.getUint8(mnStart + 4)
+    );
+    if (sig !== "Nikon") return;
+    const tiffBase = mnStart + 10;
+    const b0 = view.getUint8(tiffBase), b1 = view.getUint8(tiffBase + 1);
+    let mnLE;
+    if (b0 === 0x49 && b1 === 0x49) mnLE = true;
+    else if (b0 === 0x4d && b1 === 0x4d) mnLE = false;
+    else return;
+    const mnIFD0Offset = view.getUint32(tiffBase + 4, mnLE) + tiffBase;
+    const mnIFD0 = readIFD(view, mnIFD0Offset, mnLE);
+    const previewEntry = mnIFD0.entries.get(0x11);
+    if (!previewEntry) return;
+    const previewIFDOffset = readValues(view, previewEntry, mnLE)[0] + tiffBase;
+    if (previewIFDOffset <= 0 || previewIFDOffset >= buffer.byteLength) return;
+    const previewIFD = readIFD(view, previewIFDOffset, mnLE);
+    const jpegOff = getTagValues(previewIFD.entries, 0x201, view, mnLE);
+    const jpegLen = getTagValues(previewIFD.entries, 0x202, view, mnLE);
+    const width = getTagValues(previewIFD.entries, 0x100, view, mnLE);
+    const height = getTagValues(previewIFD.entries, 0x101, view, mnLE);
+    if (jpegOff && jpegLen) {
+      const off = jpegOff[0] + tiffBase;
+      const len = jpegLen[0];
+      if (off + len <= buffer.byteLength) {
+        candidates.push({ offset: off, length: len, width: width ? width[0] : null, height: height ? height[0] : null });
+      }
+    }
+  }
+
+  function collectJpegCandidates(buffer) {
+    const view = new DataView(buffer);
+    const b0 = view.getUint8(0), b1 = view.getUint8(1);
+    let le;
+    if (b0 === 0x49 && b1 === 0x49) le = true;
+    else if (b0 === 0x4d && b1 === 0x4d) le = false;
+    else throw new Error("TIFF 헤더를 찾을 수 없습니다 (NEF 파일이 맞는지 확인하세요)");
+    if (view.getUint16(2, le) !== 42) throw new Error("올바르지 않은 TIFF 매직 넘버");
+    const ifd0Offset = view.getUint32(4, le);
+
+    const candidates = [];
+    const visited = new Set();
+
+    function extractFromIFD(offset, depth) {
+      if (depth > 4 || offset <= 0 || offset >= buffer.byteLength || visited.has(offset)) return null;
+      visited.add(offset);
+      let ifd;
+      try { ifd = readIFD(view, offset, le); } catch (e) { return null; }
+      const { entries } = ifd;
+
+      const compression = getTagValues(entries, 0x103, view, le);
+      const jpegOff = getTagValues(entries, 0x201, view, le);
+      const jpegLen = getTagValues(entries, 0x202, view, le);
+      const stripOff = getTagValues(entries, 0x111, view, le);
+      const stripLen = getTagValues(entries, 0x117, view, le);
+      const width = getTagValues(entries, 0x100, view, le);
+      const height = getTagValues(entries, 0x101, view, le);
+
+      if (compression && compression[0] === 6) {
+        let off = null, len = null;
+        if (jpegOff && jpegLen) { off = jpegOff[0]; len = jpegLen[0]; }
+        else if (stripOff && stripLen) { off = stripOff[0]; len = stripLen[0]; }
+        if (off != null && len > 0 && off + len <= buffer.byteLength) {
+          candidates.push({ offset: off, length: len, width: width ? width[0] : null, height: height ? height[0] : null });
+        }
+      }
+
+      const subIFDsEntry = entries.get(0x14a);
+      if (subIFDsEntry) {
+        try { readValues(view, subIFDsEntry, le).forEach(o => extractFromIFD(o, depth + 1)); } catch (e) {}
+      }
+      const exifEntry = entries.get(0x8769);
+      if (exifEntry) {
+        try { extractFromIFD(readValues(view, exifEntry, le)[0], depth + 1); } catch (e) {}
+      }
+      return ifd.nextOffset;
+    }
+
+    let next = ifd0Offset, guard = 0;
+    while (next && next > 0 && next < buffer.byteLength && guard < 8) {
+      next = extractFromIFD(next, 0);
+      guard++;
+    }
+
+    try { extractNikonMakerNotePreview(buffer, view, le, ifd0Offset, candidates); } catch (e) {}
+
+    return candidates.filter(c => {
+      if (c.offset + 2 > buffer.byteLength) return false;
+      const marker = new Uint8Array(buffer, c.offset, 2);
+      return marker[0] === 0xff && marker[1] === 0xd8;
+    });
+  }
+
+  function pickBest(candidates) {
+    if (!candidates.length) return null;
+    return candidates.slice().sort((a, b) => {
+      const areaA = (a.width && a.height) ? a.width * a.height : 0;
+      const areaB = (b.width && b.height) ? b.width * b.height : 0;
+      if (areaA !== areaB) return areaB - areaA;
+      return b.length - a.length;
+    })[0];
+  }
+
+  async function encodeToWebp(sourceBlob, quality, maxLongEdge) {
+    const bitmap = await createImageBitmap(sourceBlob);
+    let width = bitmap.width, height = bitmap.height;
+    if (maxLongEdge > 0 && Math.max(width, height) > maxLongEdge) {
+      const scale = maxLongEdge / Math.max(width, height);
+      width = Math.max(1, Math.round(width * scale));
+      height = Math.max(1, Math.round(height * scale));
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, width, height);
+    bitmap.close && bitmap.close();
+    const webpBlob = await new Promise((resolve, reject) => {
+      canvas.toBlob(b => b ? resolve(b) : reject(new Error("WebP 인코딩 실패 (브라우저가 WebP 인코딩을 지원하지 않을 수 있습니다)")), "image/webp", quality);
+    });
+    return { webpBlob, width, height };
+  }
+
+  async function processFile(file, quality, maxLongEdge) {
+    if (/\.nef$/i.test(file.name)) {
+      const buffer = await file.arrayBuffer();
+      const candidates = collectJpegCandidates(buffer);
+      const best = pickBest(candidates);
+      if (!best) throw new Error("임베디드 미리보기 이미지를 찾지 못했습니다");
+      const jpegBlob = new Blob([new Uint8Array(buffer, best.offset, best.length)], { type: "image/jpeg" });
+      return encodeToWebp(jpegBlob, quality, maxLongEdge);
+    }
+    return encodeToWebp(file, quality, maxLongEdge);
+  }
+
+  function fmtBytes(n) {
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(0) + " KB";
+    return (n / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  function outName(name) {
+    return name.replace(/\.[^.]+$/i, "") + ".webp";
+  }
+
+  // ---- minimal ZIP writer (stored, no compression) ----
+  const crcTable = (() => {
+    const table = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+      table[n] = c >>> 0;
+    }
+    return table;
+  })();
+
+  function crc32(data) {
+    let crc = 0xffffffff;
+    for (let i = 0; i < data.length; i++) crc = (crc >>> 8) ^ crcTable[(crc ^ data[i]) & 0xff];
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+
+  function u16(n) { const b = new Uint8Array(2); new DataView(b.buffer).setUint16(0, n, true); return b; }
+  function u32(n) { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, n, true); return b; }
+  function concatUint8(arrays) {
+    let total = 0;
+    arrays.forEach(a => total += a.length);
+    const out = new Uint8Array(total);
+    let o = 0;
+    arrays.forEach(a => { out.set(a, o); o += a.length; });
+    return out;
+  }
+  function dosTime(d) { return ((d.getHours() & 0x1f) << 11) | ((d.getMinutes() & 0x3f) << 5) | ((d.getSeconds() >> 1) & 0x1f); }
+  function dosDate(d) { return (((d.getFullYear() - 1980) & 0x7f) << 9) | (((d.getMonth() + 1) & 0xf) << 5) | (d.getDate() & 0x1f); }
+
+  function createZip(entries) {
+    const encoder = new TextEncoder();
+    const localParts = [];
+    const centralParts = [];
+    let offset = 0;
+    const now = new Date();
+    const time = dosTime(now), date = dosDate(now);
+
+    entries.forEach(({ name, data }) => {
+      const nameBytes = encoder.encode(name);
+      const crc = crc32(data);
+      const size = data.length;
+
+      const localHeader = concatUint8([
+        u32(0x04034b50), u16(20), u16(0), u16(0), u16(time), u16(date),
+        u32(crc), u32(size), u32(size), u16(nameBytes.length), u16(0),
+      ]);
+      localParts.push(localHeader, nameBytes, data);
+
+      const localHeaderOffset = offset;
+      offset += localHeader.length + nameBytes.length + data.length;
+
+      const centralHeader = concatUint8([
+        u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(time), u16(date),
+        u32(crc), u32(size), u32(size), u16(nameBytes.length), u16(0), u16(0),
+        u16(0), u16(0), u32(0), u32(localHeaderOffset),
+      ]);
+      centralParts.push(centralHeader, nameBytes);
+    });
+
+    const centralDirOffset = offset;
+    let centralSize = 0;
+    centralParts.forEach(p => centralSize += p.length);
+
+    const eocd = concatUint8([
+      u32(0x06054b50), u16(0), u16(0), u16(entries.length), u16(entries.length),
+      u32(centralSize), u32(centralDirOffset), u16(0),
+    ]);
+
+    return new Blob([...localParts, ...centralParts, eocd], { type: "application/zip" });
+  }
+
+  function uniqueName(base, used) {
+    if (!used.has(base)) { used.add(base); return base; }
+    const m = base.match(/^(.*?)(\.[^.]+)?$/);
+    const stem = m[1], ext = m[2] || "";
+    let i = 2, candidate;
+    do { candidate = `${stem}_${i}${ext}`; i++; } while (used.has(candidate));
+    used.add(candidate);
+    return candidate;
+  }
+
+  // ---- UI wiring ----
+  const qualityInput = document.getElementById("quality");
+  const qualityValue = document.getElementById("qualityValue");
+  qualityInput.addEventListener("input", () => { qualityValue.textContent = qualityInput.value; });
+  const longEdgeInput = document.getElementById("longEdge");
+
+  const dropzone = document.getElementById("dropzone");
+  const fileInput = document.getElementById("fileInput");
+  const filelist = document.getElementById("filelist");
+  const rows = document.getElementById("rows");
+  const fileCount = document.getElementById("fileCount");
+  const downloadZipBtn = document.getElementById("downloadZip");
+
+  const items = [];
+
+  dropzone.addEventListener("dragover", e => { e.preventDefault(); dropzone.classList.add("drag"); });
+  dropzone.addEventListener("dragleave", () => dropzone.classList.remove("drag"));
+  dropzone.addEventListener("drop", e => {
+    e.preventDefault();
+    dropzone.classList.remove("drag");
+    handleFiles(e.dataTransfer.files);
+  });
+  fileInput.addEventListener("change", () => handleFiles(fileInput.files));
+
+  function isSupportedFile(f) {
+    if (/\.nef$/i.test(f.name)) return true;
+    if (f.type && f.type.startsWith("image/")) return true;
+    return /\.(jpe?g|png|gif|bmp|tiff?|heic|heif|avif)$/i.test(f.name);
+  }
+
+  function handleFiles(fileListObj) {
+    const files = Array.from(fileListObj).filter(isSupportedFile);
+    if (!files.length) return;
+    filelist.hidden = false;
+    files.forEach(addRow);
+    updateCount();
+  }
+
+  function addRow(file) {
+    const row = document.createElement("div");
+    row.className = "file-row";
+    row.innerHTML = `
+      <div class="thumb placeholder">${(file.name.split(".").pop() || "IMG").toUpperCase().slice(0, 4)}</div>
+      <div class="file-meta">
+        <div class="file-name">${escapeHtml(file.name)}</div>
+        <div class="file-detail mono"><span class="dims">-</span><span class="size">${fmtBytes(file.size)}</span></div>
+        <div class="status busy">추출 중…</div>
       </div>
-      <div class="control checkbox-row">
-        <label><input type="checkbox" id="resizeToggle" checked /> 긴 변이 4000px를 넘으면 축소</label>
+      <div class="file-actions">
+        <button class="btn btn-download" disabled>다운로드</button>
+        <button class="btn btn-remove" title="목록에서 삭제">삭제</button>
       </div>
-    </section>
+    `;
+    rows.appendChild(row);
 
-    <section class="actions" id="actions" hidden>
-      <button id="convertAllBtn" class="btn primary">전체 변환</button>
-      <button id="downloadZipBtn" class="btn" disabled>전체 ZIP 다운로드</button>
-      <button id="clearBtn" class="btn ghost">목록 비우기</button>
-    </section>
+    const item = {
+      file,
+      rowEl: row,
+      thumbEl: row.querySelector(".thumb"),
+      dimsEl: row.querySelector(".dims"),
+      statusEl: row.querySelector(".status"),
+      downloadBtn: row.querySelector(".btn-download"),
+      removeBtn: row.querySelector(".btn-remove"),
+      result: null,
+      objectUrl: null,
+      removed: false,
+    };
+    items.push(item);
+    item.removeBtn.onclick = () => removeItem(item);
 
-    <section id="fileList" class="file-list"></section>
+    const quality = Number(qualityInput.value) / 100;
+    const maxLongEdge = Number(longEdgeInput.value) || 0;
+    processFile(file, quality, maxLongEdge).then(result => {
+      if (item.removed) return;
+      item.result = result;
+      item.thumbEl.classList.remove("placeholder");
+      item.thumbEl.textContent = "";
+      const url = URL.createObjectURL(result.webpBlob);
+      item.objectUrl = url;
+      const img = document.createElement("img");
+      img.className = "thumb";
+      img.src = url;
+      item.thumbEl.replaceWith(img);
+      item.thumbEl = img;
+      item.dimsEl.textContent = (result.width && result.height) ? `${result.width}×${result.height}` : "";
+      item.statusEl.textContent = `완료 · ${fmtBytes(result.webpBlob.size)}`;
+      item.statusEl.className = "status ok";
+      item.downloadBtn.disabled = false;
+      item.downloadBtn.textContent = "다운로드";
+      item.downloadBtn.onclick = () => triggerDownload(url, outName(file.name));
+      updateCount();
+    }).catch(err => {
+      if (item.removed) return;
+      item.statusEl.textContent = err.message || "변환 실패";
+      item.statusEl.className = "status err";
+      updateCount();
+    });
+  }
 
-    <footer>
-      <p>모든 변환은 사용자의 브라우저에서만 처리되며, 이미지가 외부 서버로 전송되지 않습니다.</p>
-    </footer>
-  </div>
+  function removeItem(item) {
+    item.removed = true;
+    if (item.objectUrl) URL.revokeObjectURL(item.objectUrl);
+    item.rowEl.remove();
+    const idx = items.indexOf(item);
+    if (idx !== -1) items.splice(idx, 1);
+    updateCount();
+    if (items.length === 0) filelist.hidden = true;
+  }
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <script src="script.js"></script>
+  function updateCount() {
+    const done = items.filter(i => i.result).length;
+    fileCount.textContent = `${items.length}개 중 ${done}개 변환 완료`;
+    downloadZipBtn.disabled = done === 0;
+  }
+
+  downloadZipBtn.addEventListener("click", async () => {
+    const ready = items.filter(i => i.result);
+    if (!ready.length) return;
+    downloadZipBtn.disabled = true;
+    const originalLabel = downloadZipBtn.textContent;
+    downloadZipBtn.textContent = "압축하는 중…";
+    try {
+      const used = new Set();
+      const entries = [];
+      for (const it of ready) {
+        const name = uniqueName(outName(it.file.name), used);
+        const data = new Uint8Array(await it.result.webpBlob.arrayBuffer());
+        entries.push({ name, data });
+      }
+      const zipBlob = createZip(entries);
+      triggerDownload(URL.createObjectURL(zipBlob), `webp_변환_${entries.length}장.zip`);
+    } finally {
+      downloadZipBtn.disabled = false;
+      downloadZipBtn.textContent = originalLabel;
+    }
+  });
+
+  function triggerDownload(url, filename) {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+})();
+</script>
 </body>
 </html>
