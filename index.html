@@ -277,6 +277,7 @@
         <li><b>장축을 리사이즈하는 것</b>은 실제로 픽셀 수를 줄이는 것이라 화질이 떨어집니다. 다만 초고해상도 원본을 그대로 올리면 LTE 환경이나 저사양 기기에서 로딩이 느려지므로, 장축 4000px 안팎으로 제한하는 편이 열람 경험에는 낫습니다.</li>
       </ul>
       <p>NEF는 브라우저 안에서 LibRaw(WASM)로 실제 raw 현상을 하기 때문에 사진 한 장당 몇 초씩 걸릴 수 있고, 메모리 문제를 피하려고 한 번에 한 장씩 처리합니다. raw 엔진 로드에 실패하면(오프라인 등) 자동으로 카메라 내장 미리보기 JPEG를 쓰는 방식으로 대체됩니다.</p>
+      <p>고감도(ISO)로 찍은 사진은 노이즈 제거 강도를 ISO에 맞춰 자동으로 올립니다. 카메라가 자체적으로 지우는 색 노이즈를 raw 디코더는 그대로 남겨두는데, 이게 특히 무채색 영역에서 채도가 과하게 높아 보이는 원인이라 ISO 800 미만은 그대로, 800~3200은 약하게, 3200 초과는 강하게 걸어 그 차이를 줄입니다. ISO가 높을수록 처리 시간도 늘어납니다.</p>
       <p class="limits">2026년 기준 갤러리 업로드 제한: 장당 최대 20MB, 글 하나에 최대 50장 · 합산 120MB. 장당 8~10MB를 넘지 않는 선을 권장합니다.</p>
     </div>
   </details>
@@ -513,14 +514,55 @@
     return libRawModulePromise;
   }
 
+  // EXIF ISOSpeedRatings (0x8827), inside the Exif SubIFD (0x8769) off IFD0.
+  // Read directly rather than through LibRaw so we can pick denoise settings
+  // before paying for a demosaic pass.
+  function readIso(buffer) {
+    try {
+      const view = new DataView(buffer);
+      const b0 = view.getUint8(0), b1 = view.getUint8(1);
+      let le;
+      if (b0 === 0x49 && b1 === 0x49) le = true;
+      else if (b0 === 0x4d && b1 === 0x4d) le = false;
+      else return null;
+      if (view.getUint16(2, le) !== 42) return null;
+      const ifd0Offset = view.getUint32(4, le);
+      const ifd0 = readIFD(view, ifd0Offset, le);
+      const exifEntry = ifd0.entries.get(0x8769);
+      if (!exifEntry) return null;
+      const exifOffset = readValues(view, exifEntry, le)[0];
+      const exifIFD = readIFD(view, exifOffset, le);
+      const iso = getTagValues(exifIFD.entries, 0x8827, view, le);
+      return iso ? iso[0] : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // High-ISO shots carry real sensor noise that the camera's own JPEG engine
+  // suppresses in-camera; LibRaw doesn't do that by default, and the leftover
+  // per-pixel color noise reads as extra saturation in flat/neutral areas
+  // (measured directly against camera JPEGs — plain areas that were near-zero
+  // chroma variance in the JPEG came out with ~15-25 stdev of R-G/G-B/R-B in
+  // the undenoised raw decode). Scale denoise strength with ISO so low-ISO
+  // shots stay fast and untouched.
+  function pickNoiseSettings(iso) {
+    if (iso == null || iso < 800) return {};
+    if (iso <= 3200) return { fbddNoiserd: 1 };
+    return { fbddNoiserd: 2, threshold: 300 };
+  }
+
   async function decodeNefWithLibRaw(file) {
     const LibRawCtor = await loadLibRaw();
     if (!libRawInstance) libRawInstance = new LibRawCtor();
-    const bytes = new Uint8Array(await file.arrayBuffer());
+    const arrayBuffer = await file.arrayBuffer();
+    const iso = readIso(arrayBuffer);
+    const bytes = new Uint8Array(arrayBuffer);
     await libRawInstance.open(bytes, {
       outputBps: 8,
       outputColor: 1,
       useCameraWb: true,
+      ...pickNoiseSettings(iso),
     });
     const img = await libRawInstance.imageData();
     if (!img || !img.data || !img.colors || img.colors < 3) {
